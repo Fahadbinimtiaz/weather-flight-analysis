@@ -1,0 +1,621 @@
+---
+title: "Effects of Weather on Flying Activities"
+author: "Fahad Bin Imtiaz"
+date: "2024-10-25"
+output: pdf_document
+editor_options: 
+  markdown:
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Effects of Weather on Flying Activities
+
+## Executive Summary
+
+The objective of this project is to analyze the impact of various weather variables on U.S. flight delays and cancellations, using the 2022 US Airlines Domestic Departure data set. This data set, sourced from Kaggle, contains detailed records of flight operations, weather conditions, and instances of delays and cancellations due to different factors including adverse weather. By understanding how specific weather conditions contribute to flight delays and cancellations, we aim to provide insights that could help airlines and airport authorities better anticipate disruptions, thereby improving operational efficiency.
+
+To achieve these insights, this project focuses on major northern U.S. airports, where weather impacts on flights are typically more severe and varied due to seasonal factors, such as significant winter conditions. This comprehensive data set compiles US domestic flight takeoff information, airport details, aircraft specifications, and weather data, providing a rich basis for analyzing the role of weather in flight disruptions. The analysis employs two advanced machine learning models, **Random Forest and XGBoost**, to predict delays and cancellations. These models are chosen for their robustness in handling complex data with non-linear relationships and their ability to capture the interactions among multiple weather variables.
+
+The analysis pipeline includes data cleaning, exploratory data analysis (EDA), and feature selection to prepare the data for model training and evaluation. Our data set was sourced from Kaggle under the title "2022 US Airlines Domestic Departure Data" (<https://www.kaggle.com/datasets/jl8771/2022-us-airlines-domestic-departure-data>). This project demonstrated that specific weather variables, have a significant impact on flight delays and flight cancellations. Random Forest and XGBoost models both successfully predicted flight delays and flight cancellations with respect to weather conditions.
+
+## 1. Introduction
+
+The 2022 US Airlines Domestic Departure data set offers a comprehensive view of U.S. flights, including a range of variables related to flight schedules, delays, cancellations, and detailed weather conditions at departure. This data set contains **6,921,847** observations. However, given the significant impact of regional weather variations, our analysis is focused on **top 20 northern U.S. airports** with **highest observations** out of total 375 airports throughout the U.S, which often experience more extreme weather, such as snowstorms, lower temperatures, and strong winds, leading to a higher likelihood of delays and cancellations.
+
+The decision to filter and focus on the top 20 northern airports was based on the observed differences in weather patterns across regions. By concentrating on airports in regions with high data availability and consistent weather-driven impacts, we aim to provide actionable insights that could improve planning, resource allocation, increase the reliability and to provide more accurate insights into how adverse weather specifically affects flight operations in northern U.S. airports.
+
+### Key Variables
+### Flight Operations
+
+*Departure Delay*: This is measured in minutes, and values greater than zero indicates a delay.
+*Cancellation Status*: Indicates whether a flight was canceled or not. This includes several reasons such as no cancellations, carrier cancellation, and security cancellation, along with cancellations often driven by severe weather conditions that compromise safety.
+
+### Weather Conditions
+
+*Wind Speed (Knots)*: High wind speeds can disrupt flight operations, particularly during takeoff and landing phases.
+*Wind Gust (Knots)*: Sudden wind gusts can be challenging for flight safety and stability.
+*Visibility (Miles)*: Low visibility due to fog, rain, or snow can delay or prevent flights, especially in poor landing conditions.
+*Temperature (Celsius)*: Extreme temperatures can affect aircraft performance, particularly in freezing conditions.
+*Dew Point (Celsius)*: A measure of atmospheric moisture, which is related to precipitation and fog, potentially impacting visibility and operations.
+*Relative Humidity (Percent)*: High humidity can lead to fog formation, which affects visibility.
+*Lowest Cloud Layer (Feet)*: The height of the lowest cloud layer impacts visibility for takeoff and landing.
+*Active Weather Indicators*: These include categories such as “No Weather Effects,” “Weather Effects Present,” and “Significant Weather Effects,” with the latter indicating severe conditions that are more likely to cause cancellations.
+
+## 2. Methods & Analysis
+
+### Loading Required Libraries
+To begin the analysis, we load essential libraries required for data manipulation, visualization, and model training. This includes `tidyverse` for data wrangling and visualization, `ggcorrplot` for creating correlation plots, `caret` for data partitioning and model training, and `xgboost` and `randomForest` for building advanced machine learning models.
+
+```{r Loading Required Packages, echo=FALSE, message = FALSE, warning = FALSE}
+# Install required packages (if not already installed)
+if (!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if (!require(ggcorrplot)) install.packages("ggcorrplot", repos = "http://cran.us.r-project.org")
+if (!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if (!require(xgboost)) install.packages("xgboost", repos = "http://cran.us.r-project.org")
+if (!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)       # For data manipulation and visualization
+library(ggcorrplot)      # For correlation plot visualization
+library(caret)           # For test and training of Models
+library(xgboost)         # For XGBOOST advanced ML Model
+library(randomForest)    # For RF advanced ML Model
+```
+
+### Data Preparation:
+
+The data preparation step involves checking if a pre-processed version of the original data set (**flight_weather_data.csv**) is already available. The pre-processed version has been created for this project only. This approach helps streamline the analysis process by saving a cleaned version of the data for future use. If not, the original raw data is then downloaded from Kaggle, cleaned, and processed.
+
+If the data set is downloaded, it undergoes a series of cleaning steps, including removing unnecessary columns that do not contribute to our analysis and handling missing values. The final data set (flight_weather_data.csv) includes only relevant weather-related and flight related variables, making it efficient for EDA and modeling.
+
+```{r Loading Data Set, echo=FALSE, message = FALSE, warning = FALSE}
+# It will load and perform actions on the original data set if cleaned data set is not available
+# Check if the merged and cleaned data set file already exists
+if (file.exists("flight_weather_data.csv")) {
+  # Load the existing prepared data set
+  flight_weather_data <- read.csv("flight_weather_data.csv")
+  } else {
+    # Download and unzip the data if the pre processed file does not exist
+    dl <- "archive.zip"         # Create a temporary zip file
+    options(timeout = 3600)     # Timeout setting in case of slow download 
+    if(!file.exists(dl))        
+      download.file("https://www.kaggle.com/api/v1/datasets/download/jl8771/2022-us-airlines-domestic-departure-data", dl, mode = "wb")
+    unzip("archive.zip")
+  
+    # Load data
+    flight_weather_data <- read.csv("CompleteData.csv")
+  
+    # Data cleaning
+    flight_weather_data <- flight_weather_data %>% 
+      na.omit() %>% 
+      select(-c(FL_DATE, DEP_HOUR, MKT_UNIQUE_CARRIER, MKT_CARRIER_FL_NUM,
+                OP_UNIQUE_CARRIER, OP_CARRIER_FL_NUM, TAIL_NUM, DEST, DEP_TIME,
+                CRS_DEP_TIME, TAXI_OUT, AIR_TIME, DISTANCE, LATITUDE, LONGITUDE,
+                ELEVATION, MESONET_STATION, YEAR.OF.MANUFACTURE, MANUFACTURER,
+                ICAO.TYPE, RANGE, WIDTH, WIND_DIR, ALTIMETER, N_CLOUD_LAYER, 
+                LOW_LEVEL_CLOUD, MID_LEVEL_CLOUD, HIGH_LEVEL_CLOUD, CLOUD_COVER))
+  
+    # Create delay and cancel flags
+    # Create a delay flag: 1 for delayed flights, 0 for on-time
+    # Create a cancel flag: 1 for cancelled, 0 for on-time
+    flight_weather_data <- flight_weather_data %>%
+      mutate(delay_flag = ifelse(DEP_DELAY > 0, 1, 0), cancel_flag = ifelse(CANCELLED == 2, 1, 0))
+  
+    # Save the processed data to CSV for future use
+    write.csv(flight_weather_data, "flight_weather_data.csv", row.names = FALSE)
+    }
+```
+
+### Data Preprocessing
+
+Data pre-processing involves cleaning and filtering of data set to ensure it meets analysis requirements. We first check for the number of records per airport to identify airports with sufficient data. Given the extensive data set covering multiple airports, focusing on a subset (specifically northern U.S. airports) helps reduce variability and improves the interpretability of our findings. This regional focus on top 20 northern airports by highest observation counts is motivated by the fact that these areas experience more severe weather disruptions. By limiting the analysis to this subset, it will help us to develop models that are more accurate for regions frequently impacted by adverse weather.
+
+```{r Data Preprocessing, echo=FALSE, message = FALSE, warning = FALSE}
+# Count the number of records per airport
+airport_counts <- flight_weather_data %>%
+  group_by(ORIGIN) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+
+# View the top 50 airports with the most data
+print(airport_counts %>% head(50))
+```
+
+Based on the list of 50 airports, 20 airports are classified as being from the northern U.S. region. The data is then filtered to include only the top 20 northern airports. These were identified by focusing on departure origin airports that are geographically located in the northern half of the country. This filtering reduces regional variation, allowing the model to focus on the more similar weather patterns. The top 20 northern airports were included because, beyond the top 50 airports across the U.S., the number of observations drops below 30000, contributing minimally to the overall effectiveness. The combined top 20 northern region observations came out to be **2164065**.
+
+```{r Create Regional Data Set, echo=FALSE, message = FALSE, warning = FALSE}
+# Define selected high-data airports within the Southeast/Southwest region
+selected_airports <- c("ORD", "DEN", "LGA", "EWR", "JFK", "BOS", "DTW", "MSP",
+                       "SLC", "PHL", "BWI", "MDW", "IAD", "STL", "PDX", "IND",
+                       "PIT", "CMH", "CLE", "CVG")
+
+# Filter the data to include only these airports
+regional_data <- flight_weather_data %>%
+  filter(ORIGIN %in% selected_airports)
+
+# Verify the filtered data set
+print(regional_data %>% group_by(ORIGIN) %>% summarize(count = n()))
+
+rm(airport_counts, selected_airports)  #To clean up
+
+```
+
+### Data Structure
+
+Data pre-processing involves examining the structure of the cleaned data set and ensuring it meets our analysis requirements. Understanding the data structure is crucial for ensuring that all variables are correctly formatted and ready for analysis. This step also helps identify any additional cleaning needs before proceeding with EDA. It shows that most of the data we will be dealing with is either in **numeric** or in **integer** format.
+
+```{r Verify Data Structure, echo=FALSE, message = FALSE, warning = FALSE}
+# Check structure of the cleaned dataset
+str(regional_data)
+
+# View a summary of the dataset
+summary(regional_data[c("DEP_DELAY", "WIND_SPD", "WIND_GUST","VISIBILITY","TEMPERATURE","DEW_POINT","REL_HUMIDITY")])
+```
+A brief analysis of the summary statistics for key variables related to departure delays and weather conditions in the regional_data data set is as follows:
+
+1. Departure Delay (DEP_DELAY):
+**Range:** The delay values vary significantly, from -93 minutes (early departures) to 5,995 minutes (extremely delayed).
+**Central Tendency:** The median delay is -1 minute, indicating a slight tendency toward on-time or early departures. However, the mean delay of 13.23 minutes suggests that extreme delays are skewing the average upward.
+
+2. Wind Speed (WIND_SPD):
+**Range:** Wind speeds range from 0 to 43 knots.
+**Central Tendency:** The median wind speed is 8 knots, with an average of 8.174 knots, indicating moderate wind conditions across most flights in the data set.
+
+3. Wind Gust (WIND_GUST):
+**Range:** Wind gusts go up to 54 knots, though many observations show a gust of 0 knots, as seen from the 1st quartile, median, and 3rd quartile values.
+**Interpretation:** This suggests that strong gusts are relatively rare, but when they do occur, they may impact flight operations, especially during severe weather.
+
+4. Visibility:
+**Range:** Visibility varies between 0 to 60 miles, with a median and 3rd quartile at 10 miles.
+**Distribution:** The high visibility values (median and 3rd quartile at 10 miles) indicate generally clear conditions, though lower visibility may impact flights during adverse weather.
+
+5. Temperature:
+**Range:** Temperature values range from -30°C to 40.61°C, reflecting a broad climate range across airports.
+**Central Tendency:** The median temperature is 12.78°C, with an average of 12.09°C, showing moderate conditions overall, with occasional extremes.
+
+6. Dew Point:
+**Range:** Dew point temperatures span from -32.78°C to 28.28°C.
+**Interpretation:** The median of 4.39°C indicates relatively dry conditions, with some instances of higher humidity.
+
+7. Relative Humidity (REL_HUMIDITY):
+**Range:** Humidity levels vary from 4.9% to 100%.
+**Central Tendency:** The median humidity is 63.12%, and the mean is 61.78%, showing generally moderate humidity levels.
+
+### Exploratory Data Analysis (EDA)
+
+The EDA focuses on visualizing patterns and relationships in flight cancellations due to weather, as well as the conditions under which delays are likely. This includes analyzing distributions of weather variables like wind speed, gusts, visibility, temperature, and humidity to understand their impact on cancellations. This initial analysis identifies weather factors that correlate with cancellations, helping us prioritize features for modeling. Insights such as high cancellations in low visibility or high wind speed or gust conditions help frame the subsequent modeling phase. It comes out to be only **7065** flights which are cancelled due to weather out of total of *2164065* observations.
+
+```{r Exploratory Data Analysis on Cancellations, echo=FALSE, message = FALSE, warning = FALSE}
+# Select weather cancellations flights only
+weather_cancellations <- regional_data %>%
+     filter(cancel_flag == 1) %>% filter(ACTIVE_WEATHER == 1 | ACTIVE_WEATHER == 2)
+
+# Effect of Wind Speed on Weather Cancellations
+weather_cancellations %>% filter (WIND_SPD > 0) %>% 
+  ggplot(aes(x = WIND_SPD)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", alpha = 0.7) +
+  labs(title = "Effect of Wind Speed on Weather Cancellations", 
+       x = "Wind Speed (Knots)", y = "Count") +
+  theme_minimal()
+
+# Effect of Wind gust on Weather Cancellations
+weather_cancellations %>% filter (WIND_GUST > 0) %>% 
+  ggplot(aes(x = WIND_GUST)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", alpha = 0.7) +
+  labs(title = "Effect of Wind gust on Weather Cancellations", 
+       x = "Wind Gust (Knots)", y = "Count") +
+  theme_minimal()
+
+# Effects of Visibility on Weather Cancellations
+ggplot(weather_cancellations, aes(x = VISIBILITY)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", alpha = 0.7) +
+  labs(title = "Effects of Visibility on Weather Cancellations", 
+     x = "Visibility (miles)", y = "Count") +
+  theme_minimal()
+
+# Effects of Temperature on Weather Cancellations
+ggplot(weather_cancellations, aes(x = TEMPERATURE)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Effects of Temperature on Weather Cancellations", 
+       x = "Temperature (C)", y = "Count") +
+  theme_minimal()
+
+# Effects of Dew Point Temperature on Weather Cancellations
+ggplot(weather_cancellations, aes(x = DEW_POINT)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Effects of Dew Point Temperature on Weather Cancellations", 
+       x = "Dew Point Temperature (C)", y = "Count") +
+  theme_minimal()
+
+# Effects of Humidity on Weather Cancellations
+ggplot(weather_cancellations, aes(x = REL_HUMIDITY)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Effects of Humidity on Weather Cancellations", 
+       x = "Humidity (Percentage %)", y = "Count") +
+  theme_minimal()
+
+# Group cancellations by lowest cloud layer
+cancellations_by_cloud <- weather_cancellations %>%
+  group_by(LOWEST_CLOUD_LAYER) %>%
+  summarize(count = n(), .groups = 'drop')
+
+# Plot: Cancellations by Cloud Layer Height
+ggplot(cancellations_by_cloud, aes(x = LOWEST_CLOUD_LAYER, y = count)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = 0.7) +
+  labs(title = "Weather Cancellations by Lowest Cloud Layer Height", 
+       x = "Lowest Cloud Layer (Feet)", y = "Number of Cancellations") +
+  theme_minimal()
+
+# Summary of active weather events contributing to cancellations
+weather_event_cancellations <- weather_cancellations %>%
+  group_by(ACTIVE_WEATHER) %>%
+  summarize(count = n(), .groups = 'drop')
+
+# Bar plot: Cancellations by Active Weather Event
+ggplot(weather_event_cancellations, aes(x = factor(ACTIVE_WEATHER), y = count, fill = factor(ACTIVE_WEATHER))) +
+  geom_bar(stat = "identity", alpha = 0.7) +
+  scale_x_discrete(labels = c("Weather Present", "Significant Events")) +
+  labs(title = "Weather Cancellations by Active Weather Event", 
+       x = "Active Weather Event", y = "Number of Cancellations") +
+  theme_minimal()
+
+# Select weather variables and cancellation status
+weather_vars_cancellation <- regional_data %>%
+  filter(CANCELLED == 2) %>%  # Only consider cancellations due to weather
+  select(WIND_SPD, WIND_GUST, VISIBILITY, TEMPERATURE, DEW_POINT, REL_HUMIDITY, LOWEST_CLOUD_LAYER)
+
+# Compute correlation matrix for cancellations
+  cor_matrix_cancellation <- cor(weather_vars_cancellation, use = "complete.obs")
+
+# Plot correlation matrix for cancellations
+  ggcorrplot(cor_matrix_cancellation, lab = TRUE, 
+  title = "Correlation Between Weather Variables and Cancellations")
+
+```
+
+These plots illustrate how different weather variables, such as wind speed, wind gust, visibility, temperature, dew point, and humidity, including active weather events, influence the likelihood of flight cancellations. We have observed the following insights:
+
+**1. Wind Conditions:** Higher wind speeds and gusts are associated with increased cancellations, indicating that strong winds are a critical factor affecting flight safety and operational decisions. From individual graph, it shows that most of the cancellations happened when *wind gust is more than 20 Knots*.
+
+**2. Visibility:** Poor visibility is another significant factor in cancellations. Flights are more likely to be canceled when visibility drops, *less then 2 miles*, reflecting safety concerns during adverse weather conditions.
+
+**3. Temperature and Dew Point:** Extreme temperatures (especially low temperature) and lower dew point values also show associations with cancellations. These conditions may cause operational challenges, such as icing or increased maintenance requirements.
+
+**4. Temperature and Humidity:** These variables also show some patterns, although their direct impact on cancellations might be more complex and tied to extreme weather conditions. However, higher humidity levels, especially *above 60%*, are linked with increased cancellations. This trend suggests that high moisture levels might be tied to challenging weather events like storms or fog..
+
+**5. Cloud Layer Height:** Lower cloud layers (*less than 2500 feet*) show a higher frequency of cancellations. This is consistent with operational limitations in low-cloud cover conditions.
+
+**6. Active Weather Events:** More than *6000* cancellations occurred due to weather effects present and around *900* cancellations are due to significant weather from *7065* total cancellation observations.
+
+**7. Correlation matrix:** The correlation between wind gust and wind speed, and dew point and temperature is very high, while visibility do show correlation with cloud height and temperature. Humidity shows high negative correlation (inverse relation) with visibility and cloud layer height. 
+
+After conducting EDA on flight cancellations, we shifted our focus to the impact of weather conditions on departure delays.
+This analysis is particularly relevant for northern U.S. airports, which experience more frequent and intense weather disruptions.
+By examining departure delays, we aim to understand how specific weather variables affect the likelihood and extent of delays, providing valuable insights for airline operations and resource planning.
+
+```{r Exploratory Data Analysis on Delays, echo=FALSE, message = FALSE, warning = FALSE}
+# Select delayed flights only
+delayed_flights <- regional_data %>%
+  filter(DEP_DELAY > 0 & DEP_DELAY < 2000)
+
+# Select relevant weather variables
+weather_vars <- delayed_flights %>%
+  select(WIND_SPD, WIND_GUST, VISIBILITY, TEMPERATURE, DEW_POINT, REL_HUMIDITY, LOWEST_CLOUD_LAYER)
+
+# Compute correlation matrix
+cor_matrix <- cor(weather_vars, use = "complete.obs")
+
+# Plot the correlation matrix
+ggcorrplot(cor_matrix, lab = TRUE, title = "Correlation Between Weather Variables")
+
+# Analyze average delays based on active weather events
+delays_by_weather <- delayed_flights %>%
+  group_by(ACTIVE_WEATHER) %>%
+  summarize(avg_delay = mean(DEP_DELAY), .groups = 'drop')
+print(delays_by_weather)
+
+# Plot: Average Delay by Active Weather Event
+ggplot(delays_by_weather, aes(x = factor(ACTIVE_WEATHER), y = avg_delay, fill = factor(ACTIVE_WEATHER))) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(labels = c("No Events", "Weather Present", "Significant Events")) +
+  labs(title = "Average Delay by Weather Condition", 
+       x = "Active Weather Condition", y = "Average Delay (Minutes)") +
+  theme_minimal()
+
+# Filter for delayed flights where weather effects are present (Active Weather 1 and 2)
+weather_delays <- delayed_flights %>%
+  filter(ACTIVE_WEATHER %in% c(1, 2))
+
+weather_vars_plot <- weather_delays %>%
+  select(DEP_DELAY, WIND_SPD, WIND_GUST, VISIBILITY, TEMPERATURE, DEW_POINT, REL_HUMIDITY, LOWEST_CLOUD_LAYER) %>%
+  pivot_longer(cols = -DEP_DELAY, names_to = "Variable", values_to = "Value")
+
+# Boxplot for delay distributions by Active Weather level
+ggplot(weather_delays, aes(x = factor(ACTIVE_WEATHER), y = DEP_DELAY, fill = factor(ACTIVE_WEATHER))) +
+   geom_boxplot() +
+   scale_fill_manual(values = c("skyblue", "salmon")) +
+   labs(title = "Distribution of Departure Delays by Weather Severity",
+        x = "Weather Severity (1: Present, 2: Significant)", y = "Departure Delay (minutes)") +
+   theme_minimal()
+
+# Distribution of delays by cloud layer height
+ggplot(weather_delays, aes(x = LOWEST_CLOUD_LAYER, y = DEP_DELAY)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Impact of Lowest Cloud Layer Height on Departure Delays",
+       x = "Lowest Cloud Layer Height (feet)", y = "Departure Delay (minutes)") +
+  theme_minimal()
+
+# Plot delay against each weather variable
+# This plot takes few minutes to compute
+ggplot(weather_vars_plot, aes(x = Value, y = DEP_DELAY)) +
+  geom_point(alpha = 0.3) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "Impact of Weather Variables on Departure Delays",
+       x = "Weather Variable Value", y = "Departure Delay (minutes)") +
+  theme_minimal()
+```
+
+Brief analysis of Exploratory Data Analysis (EDA) on flight delays due to weather are as follows:
+
+**1. Correlation Matrix:** The correlation matrix of weather variables shows notable correlations between wind speed and wind gust, dew point and temperature, humidity on visibility (inverse), highlighting that these variables tend to vary together under certain weather conditions. There’s a moderate correlation between relative humidity with dew point and cloud layer (inverse), which might indicate that higher humidity often accompanies weather patterns associated with delays, such as rain or fog.
+
+**2. Average Delay by Weather Condition:** The bar chart illustrates the average delay in minutes for different levels of active weather. Significant weather events lead to an average delay of approximately *78.09 minutes*, which is substantially higher than the average delays for less severe or absent weather conditions, which are *47.58 minutes* and *39.20 minutes* respectively. This clearly indicates that as weather severity increases, so does the likelihood of prolonged delays.
+
+**3. Distribution of Delays by Weather Severity:** The box plot comparing delays by weather severity indicates that significant weather events (Thunderstorms, Freezing Precipitation, Tornado, etc) tend to cause more extensive delays than mild or no weather events. This observation aligns with the expectation that severe weather conditions lead to operational challenges that can considerably impact departure schedules.
+
+**Impact of Lowest Cloud Layer Height:** The scatter plot of departure delays against the lowest cloud layer height shows that lower cloud layers (*below 5000 feet) are associated with a higher density of longer delays. As cloud layers increase in height, the density of delays generally decreases, indicating that low cloud cover likely contributes to longer delays due to reduced visibility and challenging flight conditions.
+
+**Impact of Weather Variables on Departure Delays:** Scatter plots between departure delays and individual weather variables (e.g., dew point, wind speed, visibility, temperature) reveal specific trends:
+
+*1. Wind Speed and Gust:* *Higher wind gusts* tend to correspond to an increased spread of delay times, suggesting that turbulent conditions may disrupt normal flight schedules.
+*2. Visibility:* *Reduced visibility* (less then 2.5 miles) shows a concentration of longer delays, likely due to safety protocols that restrict operations under low-visibility conditions.
+*3. Relative Humidity:* As humidity increases, *greater than 50 percent*, there is a slight rise in the density of delays, which may correlate with weather conditions like fog or rain that are conducive to delays. 
+*4. Temperature:* The scatter plot with temperature does not show a strong pattern with delays, implying that temperature alone may not be a primary factor in causing delays.
+
+These findings from the EDA suggest that certain weather conditions, particularly low cloud layers, high humidity, wind gusts, and reduced visibility, have a pronounced impact on flight delays. The analysis provides insights that support the need for predictive modeling to better understand and forecast delays based on these key weather factors.
+
+### Model Selection
+
+To model the impact of weather on flight delays and cancellations, we use two machine learning models:
+1. **Random Forest**: A powerful, non-linear model that handles complex relationships and can rank the importance of different variables.
+2. **XGBoost**: Known for its speed and performance, especially with large data sets. XGBoost can capture non-linear relationships and interactions between variables.
+
+These models are suitable for our analysis as they can manage a large number of observations and handle complex, non-linear relationships inherent in weather data. Both models have also been selected to provide feature importance metrics, which will help us understand which weather factors most influence delays and cancellations.
+
+### Dataset Preparation for Modeling
+
+In this step, we select relevant weather variables and create flags for delay and cancellation, which will serve as the target variables in our models. These variables were chosen based on their observed impact in the EDA phase.
+
+```{r Prepare Dataset for Modeling, echo=FALSE, message = FALSE, warning = FALSE}
+# Select relevant weather variables and the delay flag as the target variable
+features <- c("WIND_SPD", "WIND_GUST", "VISIBILITY", "TEMPERATURE", "DEW_POINT", 
+              "REL_HUMIDITY", "LOWEST_CLOUD_LAYER")
+model_data <- regional_data %>% 
+  select(all_of(features), delay_flag, cancel_flag)
+```
+
+### Train/Test Split:
+
+We use an 80/20 train-test split to ensure that our model has sufficient data for training while preserving a portion of data for unbiased evaluation. An 80 percent training set allows the model to learn effectively, while the 20 percent test set provides a reliable measure of performance.
+
+```{r Train and Test Dataset, echo=FALSE, message = FALSE, warning = FALSE}
+# Split the data into training and testing sets
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(model_data$delay_flag, p = 0.8, list = FALSE)
+train_data <- model_data[train_index, ]
+test_data <- model_data[-train_index, ]
+```
+
+This split is crucial as it ensures that the model’s evaluation is done on unseen data, which helps avoid overfitting and provides a realistic estimate of model performance.
+
+### Implementation:
+
+Model training was performed using Random Forest and XGBoost for both flight delays and cancellations. These models were chosen for their ability to handle large data sets and capture complex, non-linear relationships between the predictors (weather variables) and the target variables (delay and cancellation flags). Evaluation metrics included accuracy, sensitivity, specificity, and balanced accuracy to assess the models' performance comprehensively.
+
+#### Random Forest Model
+
+The Random Forest algorithm is an ensemble learning method that builds multiple decision trees and merges them to get a more accurate and stable prediction. We trained separate Random Forest models for flight cancellations and flight delays. Explanation of parameters used in this model are as follows:
+ntree = 100: We used 100 trees to balance between computational efficiency and model performance. More trees can improve performance but increase computation time.
+importance = TRUE: Setting this parameter to TRUE allows us to extract variable importance measures, which are useful for interpreting the model.
+
+```{r Model 01 Random Forest, echo=FALSE, message = FALSE, warning = FALSE}
+# This process may take couple of minutes and lots of memory
+# Please ensure to have at least 24GB memory available before running this chunk
+# Train the Random Forest model on the cancellation flag
+set.seed(123)
+rf_model_cancel <- randomForest(as.factor(cancel_flag) ~ ., 
+                         data = train_data[, c(features, "cancel_flag")], 
+                         ntree = 100, 
+                         importance = TRUE)
+
+# Train the Random Forest model on delay flag
+rf_model_delay <- randomForest(as.factor(delay_flag) ~ ., 
+                         data = train_data[, c(features, "delay_flag")], 
+                         ntree = 100, 
+                         importance = TRUE)
+```
+
+#### XGBoost Model
+
+XGBoost (Extreme Gradient Boosting) is a scalable and efficient implementation of gradient boosting machines. It is highly regarded for its speed and performance, especially on large data sets. We trained separate XGBoost models for flight cancellations and delays. Explanation of parameters used in this model are as follows:
+objective = "binary:logistic": Specifies that we are performing binary classification.
+eval_metric = "error": Uses classification error as the evaluation metric.
+max_depth = 6: Limits the depth of each tree to prevent overfitting.
+eta = 0.3: The learning rate, a lower value slows down learning but can improve performance.
+gamma = 1: Controls the minimum loss reduction required to make a split; helps with regularization.
+scale_pos_weight: Addresses class imbalance by weighting the positive class inversely proportional to its frequency.
+
+```{r Model 02 XGBoost, echo=FALSE, message = FALSE, warning = FALSE}
+# Prepare data for XGBoost for cancel flag
+dtrain_cancel <- xgb.DMatrix(data = as.matrix(train_data[, features]), label = train_data$cancel_flag)
+dtest_cancel <- xgb.DMatrix(data = as.matrix(test_data[, features]), label = test_data$cancel_flag)
+
+# Set parameters for binary classification
+params_cancel <- list(
+  objective = "binary:logistic",  # Binary classification
+  eval_metric = "error",          # Evaluation metric: classification error
+  max_depth = 6,                  # Maximum depth of a tree
+  eta = 0.3,                      # Learning rate
+  gamma = 1,                      # Minimum loss reduction required to make a further partition
+  scale_pos_weight = sum(train_data$cancel_flag == 0) / sum(train_data$cancel_flag == 1)  # Handle class imbalance
+)
+
+# Train the XGBoost model for cancel flag
+xgb_model_cancel <- xgboost(params = params_cancel, data = dtrain_cancel, nrounds = 100, verbose = 1)
+
+# Prepare data for XGBoost for delay flag
+dtrain_delay <- xgb.DMatrix(data = as.matrix(train_data[, features]), label = train_data$delay_flag)
+dtest_delay <- xgb.DMatrix(data = as.matrix(test_data[, features]), label = test_data$delay_flag)
+
+# Set parameters for binary classification
+params_delay <- list(
+  objective = "binary:logistic",
+  eval_metric = "error",
+  max_depth = 6,
+  eta = 0.3,
+  gamma = 1,
+  scale_pos_weight = sum(train_data$delay_flag == 0) / sum(train_data$delay_flag == 1)
+)
+
+# Train the XGBoost model for delay flag
+xgb_model_delay <- xgboost(params = params_delay, data = dtrain_delay, nrounds = 100, verbose = 1)
+```
+
+#### Prediction and Evaluation
+
+After training the models, we evaluated their performance on the test set. We used confusion matrices to calculate relevant evaluation metrics, which are defined below:
+
+*Accuracy:* The overall proportion of correct predictions.
+*Sensitivity (Recall):* The ability of the model to correctly identify positive cases (e.g., actual delays or cancellations).
+*Specificity:* The ability of the model to correctly identify negative cases (e.g., on-time flights).
+*Balanced Accuracy:* The average of sensitivity and specificity, useful when classes are imbalanced.
+
+The confusion matrices provide detailed insights into how well the models perform in predicting delays and cancellations. By comparing the performance metrics, we assess which model performs better for each prediction task. Variable importance plots be generated to understand which weather variables are most influential in the models' predictions.
+
+```{r Prediction on Test Set on Both Models, echo=FALSE, message = FALSE, warning = FALSE}
+# Random Forest Model
+# Predict on the test set for flight cancellations
+rf_preds_cancel <- predict(rf_model_cancel, test_data, type = "class")
+
+# Evaluate the model for flight cancellations
+rf_confusion_cancel <- confusionMatrix(rf_preds_cancel, as.factor(test_data$cancel_flag))
+
+# Predict on the test set for flight delays
+rf_preds_delay <- predict(rf_model_delay, test_data, type = "class")
+
+# Evaluate the model
+rf_confusion_delay <- confusionMatrix(rf_preds_delay, as.factor(test_data$delay_flag))
+
+# XGBoost Model
+# Predict on the test set for cancellations
+xgb_preds_cancel <- predict(xgb_model_cancel, dtest_cancel)
+xgb_preds_class_cancel <- ifelse(xgb_preds_cancel > 0.5, 1, 0)
+
+# Evaluate the XGBoost model for flight cancellations
+xgb_confusion_cancel <- confusionMatrix(as.factor(xgb_preds_class_cancel), as.factor(test_data$cancel_flag))
+
+# Predict on the test set for flight delays
+xgb_preds_delay <- predict(xgb_model_delay, dtest_delay)
+xgb_preds_class_delay <- ifelse(xgb_preds_delay > 0.5, 1, 0)
+
+# Evaluate the model
+xgb_confusion_delay <- confusionMatrix(as.factor(xgb_preds_class_delay), as.factor(test_data$delay_flag))
+```
+
+## 3. Results
+
+This section presents a comprehensive analysis of the results from both the Random Forest and XGBoost models used to predict flight delays and cancellations due to weather conditions. We evaluated these models on accuracy, sensitivity, specificity, and balanced accuracy, which helps in assessing each model’s strengths and weaknesses.
+
+```{r Display Results, echo=FALSE, message = FALSE, warning = FALSE}
+# Results of Model
+print(rf_confusion_cancel)
+print(rf_confusion_delay)
+print(xgb_confusion_cancel)
+print(xgb_confusion_delay)
+
+# Feature importance for Random Forest
+importance(rf_model_cancel)
+varImpPlot(rf_model_cancel)
+importance(rf_model_delay)
+varImpPlot(rf_model_delay)
+
+# Feature importance for XGBoost
+xgb_importance_cancel <- xgb.importance(model = xgb_model_cancel)
+xgb.plot.importance(xgb_importance_cancel)
+
+xgb_importance_delay <- xgb.importance(model = xgb_model_delay)
+xgb.plot.importance(xgb_importance_delay)
+```
+
+### 1. Random Forest Model Analysis on Flight Cancellations
+
+**Accuracy: 99.28%**, which is exceptionally high, indicating the model is effective in overall prediction.
+**Sensitivity: 99.82%**, an excellent ability to correctly identify non-cancelled flights.
+**Specificity: 57.01%**, indicates the model still struggles moderately in accurately identifying actual cancellations.
+**Balanced Accuracy: 78.42%**, reflects a strong overall performance in handling both cancellations and non-cancellations.
+**Kappa statistic: 0.6637**, highlights stronger agreement between the model's predictions and actual outcomes
+**Feature Importance:** The Random Forest model ranks **Relative Humidity, Lowest Cloud Layer, and Wind Speed and Visibility** as the top predictors for flight cancellations.
+This finding aligns with the hypothesis that these weather variables are **influential** in cancellation decisions.
+
+### 2. Random Forest Model Analysis on Flight Delays
+
+**Accuracy: 68.89%**,  which is moderate, indicating that while the model can reasonably predict delays, there is room for improvement.
+**Sensitivity: 87.76%**, showing the model’s high ability to correctly identify delayed flights.
+**Specificity: 39.21%**, indicating a limitation in accurately predicting non-delayed flights. This low specificity suggests the model is biased toward predicting delays.
+**Balanced Accuracy: 63.54%**, reflecting an overall moderate performance when considering both delayed and non-delayed classes.
+**Kappa Statistic: 0.2929**, shows slight agreement beyond chance, highlighting room for improvement.
+**Feature Importance:** The Random Forest model identifies **Relative Humidity, Lowest Cloud Layer, and Temperature** as the most significant predictors for flight delays. This aligns with the expected influence of these variables **contribute** to delays.
+
+### 3. XGBoost Model Analysis on Flight Cancellations
+
+**Accuracy: 89.89%**, slightly lower than Random Forest, but high accuracy overall.
+**Sensitivity: 89.97%**, showing good performance in detecting non-cancellations.
+**Specificity: 83.88%**, significantly higher than Random Forest in identifying actual cancellations, making it a more balanced model for cancellation prediction.
+**Balanced Accuracy: 86.92%**, reflecting a strong ability to classify both cancellations and non-cancellations correctly.
+**Feature Importance:** XGBoost highlights **Relative Humidity, Lowest Cloud Layer and Temperature** as crucial factors for cancellations, confirming the Random Forest results.
+
+### 4. XGBoost Model Analysis on Flight Delays
+
+**Accuracy: 59.92%**, which is moderate, indicating that the model’s overall ability to predict delays accurately is limited but acceptable, but is lower compared to the Random Forest model
+**Sensitivity: 61.46%**, suggesting a fair capability to detect delayed flights, although not as high as the Random Forest model's sensitivity.
+**Specificity: 57.51%**, indicating balanced ability to detect delayed flights, though still moderate in effectiveness. This specificity is notably higher than the Random Forest model, showing that XGBoost achieves a more balanced detection of both delayed and non-delayed flights.
+**Balanced Accuracy: 59.49%**, reflecting an overall fair balance in distinguishing between delayed and non-delayed flights. It is slightly lower than Random Forest.
+**Feature Importance:** XGBoost identifies **Lowest Cloud Layer, Temperature and Relative Humidity** as key contributors to flight delays, similar to the findings from the Random Forest model, and these variables play a significant role in causing flight delays.
+
+## 4. Conclusion
+This project demonstrates that specific weather variables, including **Relative Humidity, Temperature, visibility and Lowest Cloud Layer**, have a significant impact on flight delays and cancellations. Random Forest and XGBoost models successfully predicted both delays and cancellations, with each model displaying unique strengths.
+**For Flight Cancellation Model:** The XGBoost model achieves a strong performance in predicting flight cancellations, with enhanced specificity over Random Forest, making it more balanced for real-world application.
+**For Flight Delay Model:** The XGBoost model demonstrates comparable sensitivity and specificity, providing a more equitable detection of delays and non-delays compared to Random Forest.
+
+These insights can be used by airlines and airport authorities to anticipate disruptions and manage flight schedules proactively. By identifying critical weather factors, stakeholders can make more informed decisions regarding flight operations during adverse weather.
+
+## Limitations
+### Model Limitations 
+**Random Forest**
+*For Flight Cancellations:* The model specificity remains moderate. This means it struggles to correctly classify actual cancellations, likely due to the imbalance in the data set where non-cancellations dominate.
+*For Flight Delays:* The model specificity (~39.21%) is low, leading to many false positives (incorrectly predicting delays).
+
+**XGBoost Performance**
+*For Flight Cancellations:* Even though this model has high balanced accuracy (~86.92%), overall accuracy (~89.89%) is lower than Random Forest, which might limit its reliability for operational use.
+*For Flight Delays:* Both sensitivity (~61.46%) and specificity (~57.51%) are moderate, which might not meet operational needs for robust decision-making.
+
+### Sensitivity-Specificity Trade-off
+*For cancellations*, Random Forest shows better overall accuracy but suffers from lower specificity, while XGBoost provides a more balanced performance but sacrifices some accuracy. *For delays*, both models demonstrate moderate performance, with Random Forest excelling in sensitivity but lacking in specificity, and XGBoost offering balanced metrics but struggling with overall accuracy.
+
+### Data Constraints
+*Regional Focus:* This analysis is limited to the northern U.S., where weather impacts on flights are typically more severe. These findings may not generalize well to other regions with different weather patterns, such as the southern U.S., where weather variables impacting flights might differ significantly.
+*Weather-Only Variables:* The models were trained solely on weather variables. Other potential factors affecting flight delays and cancellations, such as air traffic, airport operations, and airline technical issues, were not included in this analysis, potentially limiting the scope and accuracy of predictions.
+
+## Future Work
+*Exploring Alternative Algorithms:* Experimenting with other machine learning algorithms, such as neural networks, may reveal models that perform better under specific conditions or handle imbalances in specificity more effectively.
+*Inclusion of Additional Variables:* Including seasonal variations may improve the model ability in flight activity.
+*Broaden Regional Scope:* Expanding this analysis to include other U.S. regions could provide a more comprehensive understanding of weather impacts across different climates and operational conditions.
+*Real-Time Predictions:* Develop a live system that integrates real-time weather and flight data to provide actionable insights to airlines and airport operators.
+*Expand Training Data:* Use multi-year data to account for rare weather events and reduce overfitting to specific patterns in a single year.
+
+## Reference
+1. Kaggle Dataset: 2022 US Airlines Domestic Departure Data
+<https://www.kaggle.com/datasets/jl8771/2022-us-airlines-domestic-departure-data>
